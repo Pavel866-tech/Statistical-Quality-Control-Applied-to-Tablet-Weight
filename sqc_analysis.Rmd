@@ -1,0 +1,454 @@
+---
+title: Tablet Weight Statistical Quality Control
+author: Pavel Burgueño Camarena
+date: '`r Sys.Date()`'
+output:
+  html_document:
+    df_print: paged
+    html_preview: false
+---
+
+```{r setup, include=FALSE}
+# Number the exported plots in the order they appear: 01-..., 02-...
+fig_counter <- 0
+number_figures <- function(path) {
+  fig_counter <<- fig_counter + 1
+  new_path <- file.path(dirname(path), sprintf("%02d-%s", fig_counter, basename(path)))
+  file.rename(path, new_path)
+  new_path
+}
+
+knitr::opts_chunk$set(
+  echo       = TRUE,
+  collapse   = TRUE,
+  comment    = "#>",
+  warning    = FALSE,
+  message    = FALSE,
+  fig.path   = "output/",
+  fig.width  = 9,
+  fig.height = 5.5,
+  dpi        = 150,
+  out.width  = "100%",
+  fig.process = number_figures
+)
+```
+
+# Analysis
+
+## 1. Libraries and Data
+
+Load the packages and import the tablet weight data.
+
+```{r libraries}
+library(qcc)
+library(ggplot2)
+library(dplyr)
+library(forecast)
+library(moments)
+```
+
+```{r import-data}
+tablet_weight <- read.csv("data/tablet_weight.csv")
+
+# Check the data
+head(tablet_weight)
+tail(tablet_weight)
+```
+
+## 2. Data Audit
+
+Check the structure of the data and look for missing values.
+
+```{r data-audit}
+# Basic Data Audit
+glimpse(tablet_weight)
+
+cat("Dimensions (rows, columns):", dim(tablet_weight), "\n")
+
+if (anyNA(tablet_weight)) {
+  cat("⚠ Missing values detected in the dataset.\n")
+} else {
+  cat("✓ No missing values. Summary:\n\n")
+  data.frame(
+    col    = names(tablet_weight),
+    type   = sapply(tablet_weight, class),
+    unique = sapply(tablet_weight, \(x) length(unique(x)))
+  )
+}
+```
+
+Remove the index column `X` and rename the variables.
+
+```{r clean-data}
+# Get rid of X column and change the column names
+tablet_weight <- tablet_weight |>
+  select(-X) |>
+  rename(
+    target_value = Weight.target.value,
+    weight_value = Weight.value
+  )
+
+glimpse(tablet_weight)
+```
+
+## 3. Phase I and Phase II
+
+The first 100 observations (Phase I) calibrate the control limits. The remaining 37 (Phase II) are used for monitoring.
+
+```{r phases}
+weight_value <- tablet_weight$weight_value
+phase1 <- weight_value[1:100]
+phase2 <- weight_value[101:length(weight_value)]
+
+cat("Phase I (n):", length(phase1), "| Phase II (n):", length(phase2), "\n")
+```
+
+## 4. I-MR Control Chart
+
+Many points fall beyond the limits or form violating runs, so the process is not behaving as a stable, independent process.
+
+```{r imr-chart, fig.height=6.5}
+# Run Shewhart I-MR Chart
+par(mar = c(9, 4, 4, 2))
+imr <- qcc(
+  data = phase1,
+  newdata = phase2,
+  type = "xbar.one",
+  title = "Tablet Weight - I-MR Chart",
+  xlab = "Observation",
+  ylab = "Weight (mg)",
+  add.stats = TRUE
+)
+
+summary(imr)
+```
+
+Summary of the violations detected by the chart:
+
+```{r imr-violations}
+imr_beyond_limits <- imr$violations$beyond.limits
+imr_violation_runs <- imr$violations$violating.runs
+
+imr_violations <- data.frame(
+  Type  = c("Beyond limits", "Violating runs", "Total (unique)"),
+  Count = c(length(imr_beyond_limits),
+            length(imr_violation_runs),
+            length(unique(c(imr_beyond_limits,
+                            imr_violation_runs))))
+)
+cat("I-MR Chart — Violations Summary\n\n")
+imr_violations
+```
+
+## 5. Graphical Data Exploration
+
+Distribution of the tablet weight values.
+
+```{r histogram}
+# Histogram of Tablet Weight Values
+optimal_bins <- round(1 + log(length(phase1), base = 2))
+ggplot() +
+  aes(x = phase1) +
+  geom_histogram(bins = optimal_bins, fill = "steelblue", color = "black") +
+  geom_density(fill = "blue", alpha = 0.5) +
+  geom_vline(aes(xintercept = mean(weight_value),
+                 color = "Mean"),
+             linetype = "dashed", linewidth = 1) +
+  geom_vline(aes(xintercept = median(weight_value),
+                 color = "Median"),
+             linetype = "dashed", linewidth = 1) +
+  scale_color_manual(name   = NULL,
+                     values = c("Mean"   = "red",
+                                "Median" = "darkgreen")) +
+  labs(title = "Distribution of Tablet Weight",
+       x = "Weight (mg)", y = "Count") +
+  theme_minimal() +
+  theme(legend.position = "right")
+```
+
+Boxplot and outlier detection.
+
+```{r boxplot, fig.height=4}
+# Box-plot of Tablet Weight Values
+ggplot() +
+  aes(x = phase1) +
+  geom_boxplot(fill = "steelblue", outlier.color = "red", outlier.size = 2) +
+  labs(title = "Tablet Weight — Boxplot", x = "Weight (mg)") +
+  theme_minimal()
+```
+
+```{r outliers}
+out_vals <- boxplot.stats(weight_value)$out
+out_pos <- which(weight_value %in% out_vals)
+
+data.frame(
+  n_outliers = length(out_vals),
+  Positions  = paste(out_pos, collapse = ", "),
+  Values     = paste(round(out_vals, 2), collapse = ", "),
+  Skewness   = round(skewness(phase1), 2)
+)
+```
+
+As we can observe at the histogram and box-plot graphs, there are hints the data doesn't follow a normal distribution.
+
+## 6. Autocorrelation Diagnosis
+
+A slowly decaying ACF indicates that consecutive observations are correlated, which violates the independence assumption of the Shewhart chart, causing many false alarms.
+
+```{r acf-raw}
+acf(phase1,
+    lag.max = 20,
+    type     = "correlation",
+    plot     = TRUE,
+    main = "ACF Plot of Tablet Weight"
+    )
+```
+
+Ljung-Box test (H0: no autocorrelation).
+
+```{r ljung-raw}
+Box.test(phase1, lag = 20, type = "Ljung-Box")
+```
+
+We reject H0 given a significant level of 0.05, therefore, there is enough evidence tablet weight data has autocorrelation.
+
+## 7. Normality Diagnosis
+
+Q-Q plot and Shapiro-Wilk test (H0: normality).
+
+```{r qq-raw}
+ggplot() +
+  aes(sample = phase1) +
+  stat_qq() +
+  stat_qq_line(color = "red") +
+  labs(title = "Q-Q Plot — Phase 1 Tablet Weight",
+       x = "Theoretical Quantiles",
+       y = "Sample Quantiles (mg)") +
+  theme_minimal()
+```
+
+Shapiro-Wilk test (H0: normal data).
+
+```{r shapiro-raw}
+shapiro.test(phase1)
+```
+
+We reject H0 given a significant level of 0.05, therefore, there is enough evidence tablet weight data doesn't follow a normal distribution.
+
+## 8. ARIMA Model
+
+An ARIMA model is fitted to Phase I to remove the autocorrelation.
+
+```{r arima}
+# ARIMA Model
+arima_model <- auto.arima(phase1)
+arimaorder(arima_model)
+residuals <- as.numeric(arima_model$residuals)
+```
+
+Residual diagnostics: autocorrelation (ACF and Ljung-Box).
+
+```{r acf-residuals}
+# ACF Plot for ARIMA Residuals
+acf(residuals,
+    lag.max = 20,
+    type     = "correlation",
+    plot     = TRUE,
+    main = "ACF Plot of Residuals of ARIMA Model"
+    )
+```
+
+```{r ljung-residuals}
+Box.test(residuals, lag = 20, type = "Ljung-Box")
+```
+
+We fail to reject H0 given a significant level of 0.05, therefore, there is enough evidence ARIMA residuals doesn't have autocorrelation.
+
+Residual diagnostics: normality (Q-Q plot and Shapiro-Wilk).
+
+```{r qq-residuals}
+# Normality Test for ARIMA Residuals
+ggplot() +
+  aes(sample = residuals) +
+  stat_qq() +
+  stat_qq_line(color = "red") +
+  labs(title = "Q-Q Plot — Residuals of ARIMA Model",
+       x = "Theoretical Quantiles",
+       y = "Sample Quantiles") +
+  theme_minimal()
+```
+
+```{r shapiro-residuals}
+shapiro.test(residuals)
+```
+
+We reject H0 given a significant level of 0.05, therefore, there is enough evidence tablet ARIMA residuals doesn't follow a normal distribution.
+
+## 9. EWMA Chart
+
+The EWMA chart of the residuals is robust to non-normal data. Points beyond the limits (red) indicate special causes.
+
+```{r ewma, fig.height=6.5}
+# EWMA Plot
+ewma_chart <- ewma(residuals,
+                   lambda     = 0.1,
+                   nsigmas    = 2.7,
+                   add.stats = TRUE,
+                   xlab = "Observation",
+                   ylab = "Exponentially Weighted Residual"
+                   )
+
+summary(ewma_chart)
+```
+
+### EWMA Chart After Removing the Outlier
+
+The ARIMA model and the EWMA chart are repeated without the outlier. Removing it is only valid if a special cause is identified and justified with the 6M analysis (manpower, machines, materials, methods, measurement and mother nature). The first ARIMA/EWMA (`ewma_chart`) is kept to classify the process.
+
+```{r ewma-clean, fig.height=6.5}
+# EWMA Chart After Removing the Outlier
+new_arima_model <- auto.arima(phase1[-out_pos])
+arimaorder(new_arima_model)
+new_residuals <- as.numeric(new_arima_model$residuals)
+ewma_chart_clean <- ewma(new_residuals,
+                         lambda     = 0.1,
+                         nsigmas    = 2.7,
+                         add.stats = TRUE,
+                         xlab = "Observation",
+                         ylab = "Exponentially Weighted Residual"
+                         )
+```
+
+After removing the outlier, previous out-of-control points of EWMA chart fell between the limits, correcting the instability of the process.
+
+## 10. Process Capability
+
+Capability indices against the specification limits (target ± 10 %).
+
+```{r capability, fig.height=6}
+# Capability Analysis
+target <- unique(tablet_weight$target_value)
+lsl <- target*(1-0.10)
+usl <- target*(1+0.10)
+capability <- process.capability(imr, spec.limits = c(lsl, usl))
+capability$indices
+```
+
+## 11. Process Classification
+
+Stability comes from the first EWMA chart and capability from Cp and Cpk (threshold = 1.33).
+
+```{r classification}
+# Process Classification
+stable <- length(ewma_chart$violations) == 0
+
+threshold <- 1.33
+capable <- all(capability$indices[c("Cp", "Cp_k"), "Value"] >= threshold)
+
+type <- if (stable && capable) "A" else
+  if (!stable && capable) "B" else
+    if (stable && !capable) "C" else "D"
+
+# Type of Process
+descriptions <- c(
+  A = "Stable and capable — ideal process.",
+  B = "Capable but unstable — meets specifications but unpredictable.",
+  C = "Stable but incapable — predictable but produces nonconforming units.",
+  D = "Unstable and incapable — worst state."
+)
+
+cat("Type:", type, "\n")
+cat("Summary:", descriptions[type], "\n")
+```
+
+Classification when the Taguchi index (Cpm) is also required to meet the threshold:
+
+```{r classification-cpm}
+capable_cpm <- all(capability$indices[c("Cp", "Cp_k", "Cpm"), "Value"] >= threshold)
+
+type_cpm <- if (stable && capable_cpm) "A" else
+  if (!stable && capable_cpm) "B" else
+    if (stable && !capable_cpm) "C" else "D"
+
+cat("Type (including Cpm):", type_cpm, "\n")
+cat("Summary:", descriptions[type_cpm], "\n")
+```
+
+# Summary of Results
+
+- **Stability:** the EWMA chart shows `r length(ewma_chart$violations)` points beyond limits, so the process is **`r if (stable) "stable" else "unstable"`**.
+- **Capability:** Cp = `r format(round(capability$indices["Cp", "Value"], 4), nsmall = 4)` and Cpk = `r format(round(capability$indices["Cp_k", "Value"], 4), nsmall = 4)`.
+- **Classification: Type `r type`.** `r descriptions[type]`
+- **Important:** taking Cpm (Taguchi index = `r format(round(capability$indices["Cpm", "Value"], 3), nsmall = 3)`) into account, the process is **Type `r type_cpm`**. `r descriptions[type_cpm]`
+
+# Function Overview
+
+The project defines no custom functions. It consists of two scripts that rely on the following package functions.
+
+| Script | Purpose |
+|---|---|
+| `sqc_analysis.R` | Data audit, Phase I/II split, control charts, diagnostics, ARIMA, EWMA, capability and process classification |
+| `plot_generator.R` | Reproduces every plot and saves it to `output/` |
+
+| Function | Package | Use |
+|---|---|---|
+| `qcc()` | qcc | I-MR (individuals) control chart |
+| `ewma()` | qcc | EWMA chart on ARIMA residuals |
+| `process.capability()` | qcc | Cp, Cpk and Cpm indices |
+| `auto.arima()` | forecast | Autocorrelation correction |
+| `skewness()` | moments | Distribution shape |
+| `acf()`, `Box.test()`, `shapiro.test()` | stats | Autocorrelation and normality diagnostics |
+| `ggplot()` | ggplot2 | Histogram, boxplot, Q-Q plots |
+
+# Contributing
+
+Contributions are welcome.
+
+1. Fork the repository.
+2. Create a feature branch: `git checkout -b feature/your-feature`.
+3. Commit your changes with clear messages.
+4. Push the branch and open a pull request describing what changed and why.
+
+Please open an issue first for major changes.
+
+# License
+
+Released under the [MIT License](LICENSE).
+
+# Citation
+
+If you use this project, please cite it as:
+
+```bibtex
+@misc{tablet_weight_spc,
+  author = {<Pavel Burgueño Camarena>},
+  title  = {Tablet Weight SPC Analysis},
+  year   = {2026},
+  url    = {https://github.com/<your-username>/<repository-name>}
+}
+```
+
+Please also cite the `industRial` package for the data (see `citation("industRial")` in R).
+
+# Acknowledgments
+
+- The authors of the `industRial` package for providing the dataset.
+- The developers of `qcc`, `forecast`, `ggplot2`, `dplyr` and `moments`.
+
+# References
+
+1\. Books (Statistical Quality Control)
+
+- **Gutiérrez Pulido, H., &amp; de la Vara Salazar, R.** (2009). *Control estadístico de calidad y Seis Sigma* (2.ª ed.). McGraw-Hill/Interamericana Editores.
+
+- **Montgomery, D. C.** (2013). *Introduction to statistical quality control* (7th ed.). John Wiley &amp; Sons.
+
+2\. ICH Guidelines (International Council for Harmonisation)
+
+- **International Conference on Harmonisation of Technical Requirements for Registration of Pharmaceuticals for Human Use.** (2008). *Pharmaceutical quality system Q10*. ICH.
+
+- **International Conference on Harmonisation of Technical Requirements for Registration of Pharmaceuticals for Human Use.** (2009). *Pharmaceutical development Q8(R2)*. ICH.
+
+- **International Council for Harmonisation of Technical Requirements for Registration of Pharmaceuticals for Human Use.** (2023). *Quality risk management Q9(R1)*. ICH.
+
+- **International Council for Harmonisation of Technical Requirements for Registration of Pharmaceuticals for Human Use.** (2023). *Analytical procedure development Q14*. ICH.
