@@ -39,17 +39,47 @@ This project evaluates whether a tablet compression process is
 data are split into Phase I (n = 100, calibration) and Phase II (n = 37,
 monitoring). An I-MR chart for individual data shows many out-of-control
 points, so autocorrelation and normality are diagnosed. An ARIMA model
-removes the autocorrelation, and an EWMA chart on the residuals is used
-for monitoring because it is robust to non-normal data. Finally,
-capability indices are computed and the process is classified.
+removes the autocorrelation but not non-normality, and an EWMA chart on
+the residuals is used for monitoring because it is robust to
+nonparametric data. Finally, capability indices are computed and the
+process is classified.
+
+## Key findings
+
+- The I-MR chart showed several out-of-control points driven by
+  autocorrelation, not by assignable causes.
+- An ARIMA(1,1,0) model removed the autocorrelation. However,
+  non-normality remained unchanged.
+- An EWMA chart was plotted with the ARIMA residuals: **9 points beyond
+  limits** were observed, this due to an outlier of 0.85 mg located in
+  the first measurement of the original data. Therefore, the process is
+  classified as **unstable**.
+- Capability indices: **Cp = 5.08**, **Cpk = 2.91**. Process is
+  **capable**.
+- Overall, the process is classified as **Type B: Unstable and
+  Capable**.
+- If we have a justification to remove the outlier, the process would be
+  **stable**. In addition, if we consider the Taguchi Capability Index
+  (**Cpm = 0.77**) in our classification methodology, the process would
+  become **uncapable**.
+
+<figure>
+<img src="output/08-ewma-1.png" alt="EWMA chart" />
+<figcaption aria-hidden="true">EWMA chart</figcaption>
+</figure>
+
+<figure>
+<img src="output/10-capability-1.png" alt="Capability Analysis" />
+<figcaption aria-hidden="true">Capability Analysis</figcaption>
+</figure>
 
 ## Repository Structure
 
 ``` text
 tablet_sqc_analysis/
 ├── data/
-│   └── tablet_weight.csv          # Raw tablet weight measurements
-├── output/                        # Figures embedded in this README
+│   └── tablet_weight.csv
+├── output/
 │   ├── 01-imr-chart-1.png
 │   ├── 02-histogram-1.png
 │   ├── 03-boxplot-1.png
@@ -60,15 +90,15 @@ tablet_sqc_analysis/
 │   ├── 08-ewma-1.png
 │   ├── 09-ewma-clean-1.png
 │   └── 10-capability-1.png
-├── renv/                          # renv support files (activate.R, settings.json)
-├── sqc_analysis.R                 # Main SQC analysis script
-├── sqc_analysis.Rmd               # Analysis report (source)
-├── README.Rmd                     # This file (source)
-├── README.md                      # Rendered output (committed)
-├── renv.lock                      # Exact package versions for reproducibility
-├── .Rprofile                      # Activates renv on project open
-├── .gitignore                     # Excludes renv/library/ and other clutter
-└── tablet_sqc_analysis.Rproj      # RStudio project file
+├── renv/
+├── sqc_analysis.R
+├── sqc_analysis.Rmd
+├── README.Rmd
+├── README.md
+├── renv.lock
+├── .Rprofile
+├── .gitignore
+└── tablet_sqc_analysis.Rproj
 ```
 
 ## License

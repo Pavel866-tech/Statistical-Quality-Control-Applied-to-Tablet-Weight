@@ -168,7 +168,7 @@ summary(ewma_chart)
 new_arima_model <- auto.arima(phase1[-out_pos])
 arimaorder(new_arima_model)
 new_residuals <- as.numeric(new_arima_model$residuals)
-ewma_chart <- ewma(new_residuals,
+new_ewma_chart <- ewma(new_residuals,
                    lambda     = 0.1,
                    nsigmas    = 2.7,
                    add.stats = TRUE,
