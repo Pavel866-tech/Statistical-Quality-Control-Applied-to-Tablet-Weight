@@ -1,5 +1,5 @@
 ---
-title: Tablet Weight Statistical Quality Control
+title: Statistical Quality Control Analysis on Tablet Weight Data
 author: Pavel Burgueño Camarena
 date: '`r Sys.Date()`'
 output:

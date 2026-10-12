@@ -1,7 +1,8 @@
+Statistical Quality Control Analysis on Tablet Weight Data
+================
+2026-10-11
 
-# SQC Analysis — Tablet Weight
-
-Statistical Quality Control (SQC) analysis on tablet weight data.
+**Author:** Pavel Burgueño Camarena
 
 ## Project files
 
@@ -109,6 +110,21 @@ Released under the [MIT License](LICENSE).
 
 - The authors of the `industRial` package for providing the dataset.
 - The developers of `qcc`, `forecast`, `ggplot2`, `dplyr` and `moments`.
+
+## Use of AI assistance
+
+Parts of this project were developed with the help of an AI assistant
+(DeepSeek-V3, accessed through the DeepSeek web interface).
+Specifically:
+
+- Debugging and small code details in the R scripts and R Markdown
+  files.
+- Setting up the project for reproducibility with `renv` and pushing it
+  to GitHub.
+
+The statistical methodology, analysis decisions, interpretation of
+results and final code were reviewed and validated by the author. AI was
+used as a support tool, not as a replacement for the analytical work.
 
 ## References
 
